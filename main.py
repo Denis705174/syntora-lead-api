@@ -75,9 +75,15 @@ def _check_rate_limit(ip: str) -> None:
     _recent_ips[ip] = now
 
 
+@app.get("/")
+async def root() -> dict[str, str]:
+    """Friendly root — Render health check uses /health."""
+    return {"status": "ok", "health": "/health", "lead": "POST /api/lead"}
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Health check for Fly.io."""
+    """Health check for Render."""
     return {"status": "ok"}
 
 

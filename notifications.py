@@ -44,7 +44,8 @@ async def _send_html(text: str) -> None:
                 "disable_web_page_preview": True,
             },
         )
-    if response.status_code != 200:
+    body = response.json()
+    if response.status_code != 200 or not body.get("ok"):
         raise RuntimeError(f"Telegram API error: {response.status_code} {response.text}")
 
 
