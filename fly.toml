@@ -1,0 +1,35 @@
+# Fly.io — API заявок с syntora.space
+
+app = "syntora-lead-api"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DB_PATH = "/data/leads.db"
+  BOT_DB_PATH = "/data/bot_leads.db"
+  ALLOWED_ORIGINS = "https://syntora.space"
+  WEBHOOK_BASE_URL = "https://syntora-lead-api.fly.dev"
+
+[[mounts]]
+  source = "syntora_leads_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
