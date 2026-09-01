@@ -1,4 +1,4 @@
-"""Syntora lead API + @MegaPromptBot webhook on Fly.io."""
+"""Syntora lead API + Telegram webhooks on Render."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from bot_handlers import build_dispatcher
 from bot_storage import init_bot_db
 from config import settings
+from kitchen.config import kitchen_enabled, kitchen_settings
 from notifications import LeadPayload, notify_website_lead
 from storage import init_db, save_lead
 
@@ -25,27 +26,46 @@ bot = Bot(token=settings.bot_token)
 dp = build_dispatcher(MemoryStorage())
 _recent_ips: dict[str, float] = defaultdict(float)
 
+kitchen_bot: Bot | None = None
+kitchen_dp = None
+
+if kitchen_enabled():
+    from kitchen.handlers import build_kitchen_dispatcher
+
+    kitchen_bot = Bot(token=kitchen_settings.kitchen_bot_token)
+    kitchen_dp = build_kitchen_dispatcher()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize databases and register Telegram webhook."""
+    """Initialize databases and register Telegram webhooks."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     init_db(settings.db_path)
     init_bot_db(settings.bot_db_path)
     logger.info("Lead API started, db=%s bot_db=%s", settings.db_path, settings.bot_db_path)
 
     if settings.webhook_base_url:
-        webhook_url = f"{settings.webhook_base_url.rstrip('/')}/telegram/webhook"
-        await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-        logger.info("Telegram webhook set: %s", webhook_url)
+        base = settings.webhook_base_url.rstrip("/")
+        lead_webhook = f"{base}/telegram/webhook"
+        await bot.set_webhook(url=lead_webhook, drop_pending_updates=True)
+        logger.info("Lead bot webhook set: %s", lead_webhook)
+
+        if kitchen_bot is not None and kitchen_dp is not None:
+            kitchen_webhook = f"{base}/telegram/kitchen-webhook"
+            await kitchen_bot.set_webhook(url=kitchen_webhook, drop_pending_updates=True)
+            logger.info("Kitchen bot webhook set: %s", kitchen_webhook)
     else:
-        logger.warning("WEBHOOK_BASE_URL is empty — bot webhook not registered")
+        logger.warning("WEBHOOK_BASE_URL is empty — bot webhooks not registered")
 
     yield
 
     if settings.webhook_base_url:
         await bot.delete_webhook(drop_pending_updates=False)
+        if kitchen_bot is not None:
+            await kitchen_bot.delete_webhook(drop_pending_updates=False)
     await bot.session.close()
+    if kitchen_bot is not None:
+        await kitchen_bot.session.close()
     logger.info("Lead API stopped")
 
 
@@ -78,7 +98,12 @@ def _check_rate_limit(ip: str) -> None:
 @app.get("/")
 async def root() -> dict[str, str]:
     """Friendly root — Render health check uses /health."""
-    return {"status": "ok", "health": "/health", "lead": "POST /api/lead"}
+    return {
+        "status": "ok",
+        "health": "/health",
+        "lead": "POST /api/lead",
+        "kitchen_bot": "enabled" if kitchen_bot else "disabled",
+    }
 
 
 @app.get("/health")
@@ -93,6 +118,17 @@ async def telegram_webhook(request: Request) -> dict[str, bool]:
     payload = await request.json()
     update = Update.model_validate(payload)
     await dp.feed_update(bot, update)
+    return {"ok": True}
+
+
+@app.post("/telegram/kitchen-webhook")
+async def kitchen_webhook(request: Request) -> dict[str, bool]:
+    """Receive Telegram updates for @iogram3x_bot (Kitchen AI demo)."""
+    if kitchen_bot is None or kitchen_dp is None:
+        raise HTTPException(status_code=503, detail="Kitchen bot not configured")
+    payload = await request.json()
+    update = Update.model_validate(payload)
+    await kitchen_dp.feed_update(kitchen_bot, update)
     return {"ok": True}
 
 
