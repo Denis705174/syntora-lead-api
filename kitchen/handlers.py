@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Dispatcher, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import CommandStart
 from aiogram.types import Message
 
 from kitchen.ai import get_ai_response
@@ -47,5 +47,6 @@ def build_kitchen_dispatcher() -> Dispatcher:
     """Register Kitchen AI handlers."""
     dp = Dispatcher()
     dp.message.register(handle_start, CommandStart())
-    dp.message.register(handle_message, F.text, ~Command())
+    # Exclude slash-commands; bare Command() raises in current aiogram.
+    dp.message.register(handle_message, F.text, ~F.text.startswith("/"))
     return dp
