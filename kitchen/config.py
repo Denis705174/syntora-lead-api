@@ -23,9 +23,11 @@ kitchen_settings = KitchenSettings()
 
 
 def kitchen_enabled() -> bool:
-    """Return True when Kitchen AI webhook should be registered."""
+    """Return True when Kitchen AI webhook should be registered.
+
+    Sheets CRM is optional: /start and chat work with token + Gemini key only.
+    """
     return bool(
         kitchen_settings.kitchen_bot_token.strip()
         and kitchen_settings.openai_api_key.strip()
-        and kitchen_settings.spreadsheet_id.strip()
     )

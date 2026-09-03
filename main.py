@@ -44,25 +44,23 @@ async def lifespan(app: FastAPI):
     init_bot_db(settings.bot_db_path)
     logger.info("Lead API started, db=%s bot_db=%s", settings.db_path, settings.bot_db_path)
 
-    if settings.webhook_base_url:
-        base = settings.webhook_base_url.rstrip("/")
-        lead_webhook = f"{base}/telegram/webhook"
+    webhook_base = settings.resolved_webhook_base()
+    if webhook_base:
+        lead_webhook = f"{webhook_base}/telegram/webhook"
         await bot.set_webhook(url=lead_webhook, drop_pending_updates=True)
         logger.info("Lead bot webhook set: %s", lead_webhook)
 
         if kitchen_bot is not None and kitchen_dp is not None:
-            kitchen_webhook = f"{base}/telegram/kitchen-webhook"
+            kitchen_webhook = f"{webhook_base}/telegram/kitchen-webhook"
             await kitchen_bot.set_webhook(url=kitchen_webhook, drop_pending_updates=True)
             logger.info("Kitchen bot webhook set: %s", kitchen_webhook)
     else:
-        logger.warning("WEBHOOK_BASE_URL is empty — bot webhooks not registered")
+        logger.warning("WEBHOOK_BASE_URL / RENDER_EXTERNAL_URL empty — webhooks not registered")
 
     yield
 
-    if settings.webhook_base_url:
-        await bot.delete_webhook(drop_pending_updates=False)
-        if kitchen_bot is not None:
-            await kitchen_bot.delete_webhook(drop_pending_updates=False)
+    # Do NOT delete webhooks on shutdown — Render free tier sleeps often;
+    # deleting them leaves bots silent until the next cold start.
     await bot.session.close()
     if kitchen_bot is not None:
         await kitchen_bot.session.close()
@@ -107,17 +105,25 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Health check for Render."""
-    return {"status": "ok"}
+async def health() -> dict[str, object]:
+    """Health check for Render — includes bot readiness (no secrets)."""
+    return {
+        "status": "ok",
+        "lead_bot": True,
+        "kitchen_bot": kitchen_bot is not None,
+        "webhook_base": bool(settings.resolved_webhook_base()),
+    }
 
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request) -> dict[str, bool]:
     """Receive Telegram updates for @MegaPromptBot (no polling needed)."""
     payload = await request.json()
-    update = Update.model_validate(payload)
-    await dp.feed_update(bot, update)
+    try:
+        update = Update.model_validate(payload)
+        await dp.feed_update(bot, update)
+    except Exception:
+        logger.exception("Lead webhook handler failed")
     return {"ok": True}
 
 
@@ -127,8 +133,11 @@ async def kitchen_webhook(request: Request) -> dict[str, bool]:
     if kitchen_bot is None or kitchen_dp is None:
         raise HTTPException(status_code=503, detail="Kitchen bot not configured")
     payload = await request.json()
-    update = Update.model_validate(payload)
-    await kitchen_dp.feed_update(kitchen_bot, update)
+    try:
+        update = Update.model_validate(payload)
+        await kitchen_dp.feed_update(kitchen_bot, update)
+    except Exception:
+        logger.exception("Kitchen webhook handler failed")
     return {"ok": True}
 
 
