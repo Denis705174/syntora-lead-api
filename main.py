@@ -46,13 +46,23 @@ async def lifespan(app: FastAPI):
 
     webhook_base = settings.resolved_webhook_base()
     if webhook_base:
+        # drop_pending_updates=False: on Render free cold-start the wake-up
+        # message must not be discarded, or bots look "silent".
         lead_webhook = f"{webhook_base}/telegram/webhook"
-        await bot.set_webhook(url=lead_webhook, drop_pending_updates=True)
+        await bot.set_webhook(
+            url=lead_webhook,
+            drop_pending_updates=False,
+            allowed_updates=["message", "callback_query"],
+        )
         logger.info("Lead bot webhook set: %s", lead_webhook)
 
         if kitchen_bot is not None and kitchen_dp is not None:
             kitchen_webhook = f"{webhook_base}/telegram/kitchen-webhook"
-            await kitchen_bot.set_webhook(url=kitchen_webhook, drop_pending_updates=True)
+            await kitchen_bot.set_webhook(
+                url=kitchen_webhook,
+                drop_pending_updates=False,
+                allowed_updates=["message", "callback_query"],
+            )
             logger.info("Kitchen bot webhook set: %s", kitchen_webhook)
     else:
         logger.warning("WEBHOOK_BASE_URL / RENDER_EXTERNAL_URL empty — webhooks not registered")
@@ -121,6 +131,7 @@ async def telegram_webhook(request: Request) -> dict[str, bool]:
     payload = await request.json()
     try:
         update = Update.model_validate(payload)
+        logger.info("Lead update id=%s", update.update_id)
         await dp.feed_update(bot, update)
     except Exception:
         logger.exception("Lead webhook handler failed")
