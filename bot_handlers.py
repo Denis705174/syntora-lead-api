@@ -27,21 +27,19 @@ from notifications import notify_bot_lead
 logger = logging.getLogger(__name__)
 
 WELCOME = (
-    "👋 <b>Syntora</b> — студия ИИ-менеджеров и AI-лендингов.\n\n"
+    "👋 <b>MiniScribe Labs</b> — студия ИИ-менеджеров и AI-лендингов.\n\n"
     "Это <b>демо</b> бота сбора заявок: вы заполняете короткую анкету — "
     "заявка мгновенно приходит менеджеру в Telegram.\n\n"
-    "Так же работает форма на "
-    '<a href="https://syntora.space/#contact">syntora.space</a>.\n\n'
-    "Нажмите «📝 Оставить заявку» или зайдите на сайт."
+    "Так же работает форма на сайте MiniScribe Labs.\n\n"
+    "Нажмите «📝 Оставить заявку»."
 )
 
 ABOUT = (
-    "<b>Syntora</b> внедряет ИИ-менеджеров и собирает AI-лендинги.\n\n"
+    "<b>MiniScribe Labs</b> внедряет ИИ-менеджеров и собирает AI-лендинги.\n\n"
     "• AI-сотрудник в Telegram — от 45 000 ₽\n"
     "• AI-лендинг + автоматизация — от 80 000 ₽\n"
-    "• Лиды в Google Sheets + алерт в Telegram\n\n"
-    '<a href="https://syntora.space/#pricing">Цены на сайте</a> · '
-    '<a href="https://syntora.space/#contact">Оставить заявку</a>'
+    "• Локальное хранение заявки + алерт в Telegram\n\n"
+    "Напишите «📝 Оставить заявку», чтобы протестировать контур."
 )
 
 
@@ -59,7 +57,7 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📝 Оставить заявку")],
-            [KeyboardButton(text="🌐 Сайт syntora.space"), KeyboardButton(text="ℹ️ Услуги")],
+            [KeyboardButton(text="🌐 Сайт MiniScribe"), KeyboardButton(text="ℹ️ Услуги")],
         ],
         resize_keyboard=True,
     )
@@ -96,7 +94,7 @@ async def start_lead(message: Message, state: FSMContext) -> None:
     """Begin the lead questionnaire."""
     await state.set_state(LeadForm.name)
     await message.answer(
-        "📝 <b>Заявка в Syntora</b>\n\nШаг 1 из 4: как вас зовут?",
+        "📝 <b>Заявка в MiniScribe Labs</b>\n\nШаг 1 из 4: как вас зовут?",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -110,9 +108,10 @@ async def show_about(message: Message) -> None:
 async def show_site(message: Message) -> None:
     """Link to the main website."""
     await message.answer(
-        "🌐 Сайт Syntora:\nhttps://syntora.space\n\n"
+        "🌐 Сайт MiniScribe Labs пока на syntora.space "
+        "(новый домен — после покупки).\n\n"
         "Форма на сайте работает так же — заявка сразу в Telegram.",
-        disable_web_page_preview=False,
+        disable_web_page_preview=True,
     )
 
 
@@ -202,7 +201,7 @@ async def form_message(message: Message, state: FSMContext) -> None:
         "✅ <b>Заявка отправлена!</b>\n\n"
         f"Имя: {name}\n"
         f"Контакт: {phone}\n\n"
-        "Менеджер Syntora свяжется с вами в ближайшее время.\n"
+        "Менеджер MiniScribe Labs свяжется с вами в ближайшее время.\n"
         "Именно так работает контур, который мы настраиваем клиентам.",
         parse_mode="HTML",
         reply_markup=main_keyboard(),
@@ -229,7 +228,7 @@ def build_dispatcher(storage: BaseStorage | None = None) -> Dispatcher:
     dp.message.register(cmd_cancel, Command("cancel"))
     dp.message.register(start_lead, F.text == "📝 Оставить заявку")
     dp.message.register(show_about, F.text == "ℹ️ Услуги")
-    dp.message.register(show_site, F.text == "🌐 Сайт syntora.space")
+    dp.message.register(show_site, F.text == "🌐 Сайт MiniScribe")
     dp.message.register(form_name, StateFilter(LeadForm.name), F.text)
     dp.message.register(form_phone, StateFilter(LeadForm.phone), F.text)
     dp.message.register(form_message, StateFilter(LeadForm.message), F.text)

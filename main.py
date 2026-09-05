@@ -174,11 +174,11 @@ async def submit_lead(payload: LeadPayload, request: Request) -> dict[str, str]:
         ip=ip,
     )
 
+    // Lead is already in SQLite — never fail the HTTP response solely on Telegram.
     try:
         await notify_website_lead(payload, lead_id)
     except Exception:
-        logger.exception("Unexpected Telegram error for lead_id=%s", lead_id)
-        raise HTTPException(status_code=502, detail="Telegram delivery failed") from None
+        logger.exception("Telegram notify failed for lead_id=%s (lead already saved)", lead_id)
 
-    logger.info("Lead #%s saved and sent to Telegram", lead_id)
+    logger.info("Lead #%s saved", lead_id)
     return {"status": "ok"}

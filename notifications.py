@@ -53,7 +53,7 @@ async def notify_website_lead(payload: LeadPayload, lead_id: int) -> None:
     """Notify operator about a syntora.space form submission."""
     service_label = SERVICE_LABELS.get(payload.service, payload.service)
     lines = [
-        f"🆕 <b>Заявка #{lead_id} с syntora.space</b>",
+        f"🆕 <b>Заявка #{lead_id} с сайта MiniScribe Labs</b>",
         "",
         f"<b>Имя:</b> {html.escape(payload.name)}",
         f"<b>Контакт:</b> {html.escape(payload.phone)}",
