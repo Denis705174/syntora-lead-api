@@ -92,3 +92,15 @@ async def notify_bot_lead(
         f"<b>Telegram:</b> {html.escape(user_ref)}",
     ]
     await _send_html("\n".join(lines))
+
+
+async def notify_kitchen_lead(*, phone: str, budget: str, dimensions: str) -> None:
+    """Notify operator about a Kitchen AI qualified lead."""
+    lines = [
+        "🆕 <b>Лид из Kitchen AI</b>",
+        "",
+        f"<b>Телефон:</b> {html.escape(phone)}",
+        f"<b>Бюджет:</b> {html.escape(budget)}",
+        f"<b>Размеры:</b> {html.escape(dimensions)}",
+    ]
+    await _send_html("\n".join(lines))

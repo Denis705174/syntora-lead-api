@@ -36,10 +36,12 @@ async def handle_message(message: Message) -> None:
         await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
         reply = await get_ai_response(user_id=user_id, user_text=user_text)
         await message.answer(reply)
-    except Exception:
-        logger.exception("Kitchen AI failed for user_id=%s", user_id)
+    except Exception as exc:
+        logger.exception("Kitchen AI failed for user_id=%s err=%s", user_id, type(exc).__name__)
         await message.answer(
-            "Извините, не удалось обработать запрос. Попробуйте ещё раз через минуту."
+            "Сейчас не удалось получить ответ от ИИ. "
+            "Напишите ещё раз через минуту или оставьте заявку на сайте syntora.space "
+            "/ в @MegaPromptBot."
         )
 
 

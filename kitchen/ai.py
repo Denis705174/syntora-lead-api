@@ -12,6 +12,8 @@ from openai.types.chat import ChatCompletion
 
 from kitchen.config import kitchen_settings
 from kitchen.sheets import save_lead_to_sheet
+from notifications import notify_kitchen_lead
+from yougile import create_kitchen_lead_task
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ SAVE_LEAD_TOOL: Final[dict[str, Any]] = {
     "function": {
         "name": "save_lead",
         "description": (
-            "Сохраняет лид в CRM (Google Sheets), когда клиент оставил телефон "
+            "Сохраняет лид в CRM (YouGile), когда клиент оставил телефон "
             "или согласился на расчёт/выезд замерщика и передал контакт."
         ),
         "parameters": {
@@ -145,10 +147,43 @@ async def _handle_save_lead(arguments_json: str) -> str:
     if not phone:
         return json.dumps({"ok": False, "error": "phone_required"}, ensure_ascii=False)
 
-    await save_lead_to_sheet(phone=phone, budget=budget, dimensions=dimensions)
-    logger.info("Kitchen lead saved: phone=%s budget=%s dimensions=%s", phone, budget, dimensions)
+    # Primary CRM: YouGile. Sheets optional and never blocks the chat.
+    yougile_id = None
+    try:
+        yougile_id = await create_kitchen_lead_task(
+            phone=phone, budget=budget, dimensions=dimensions
+        )
+    except Exception:
+        logger.exception("YouGile kitchen lead failed")
+
+    try:
+        await notify_kitchen_lead(phone=phone, budget=budget, dimensions=dimensions)
+    except Exception:
+        logger.exception("Telegram kitchen lead notify failed")
+
+    sheets_ok = False
+    if kitchen_settings.spreadsheet_id.strip() and kitchen_settings.google_creds_json.strip():
+        try:
+            await save_lead_to_sheet(phone=phone, budget=budget, dimensions=dimensions)
+            sheets_ok = True
+        except Exception:
+            logger.exception("Google Sheets kitchen lead failed (non-fatal)")
+
+    logger.info(
+        "Kitchen lead saved: phone=%s yougile=%s sheets=%s",
+        phone,
+        yougile_id,
+        sheets_ok,
+    )
     return json.dumps(
-        {"ok": True, "phone": phone, "budget": budget, "dimensions": dimensions},
+        {
+            "ok": True,
+            "phone": phone,
+            "budget": budget,
+            "dimensions": dimensions,
+            "yougile": bool(yougile_id),
+            "sheets": sheets_ok,
+        },
         ensure_ascii=False,
     )
 

@@ -23,6 +23,7 @@ from aiogram.types import (
 from bot_storage import save_bot_lead
 from config import settings
 from notifications import notify_bot_lead
+from yougile import create_bot_lead_task
 
 logger = logging.getLogger(__name__)
 
@@ -188,13 +189,18 @@ async def form_message(message: Message, state: FSMContext) -> None:
         )
     except Exception:
         logger.exception("Failed to notify operator for lead_id=%s", lead_id)
-        await message.answer(
-            "⚠️ Заявка сохранена, но уведомление не отправилось. "
-            "Напишите нам: https://t.me/syntora_space",
-            reply_markup=main_keyboard(),
+
+    try:
+        await create_bot_lead_task(
+            lead_id=lead_id,
+            name=name,
+            phone=phone,
+            service=service,
+            message=note or None,
+            username=message.from_user.username,
         )
-        await state.clear()
-        return
+    except Exception:
+        logger.exception("YouGile sync failed for bot lead_id=%s", lead_id)
 
     await state.clear()
     await message.answer(

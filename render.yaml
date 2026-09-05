@@ -64,7 +64,7 @@ services:
 
       - key: OPENAI_MODEL
 
-        value: gemini-2.0-flash
+        value: gemini-2.5-flash
 
       - key: SPREADSHEET_ID
 
@@ -73,4 +73,16 @@ services:
       - key: GOOGLE_CREDS_JSON
 
         sync: false
+
+      - key: YOUGILE_API_KEY
+
+        sync: false
+
+      - key: YOUGILE_COLUMN_ID
+
+        sync: false
+
+      - key: YOUGILE_API_BASE
+
+        value: https://yougile.com/api-v2
 

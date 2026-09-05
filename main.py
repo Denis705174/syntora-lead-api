@@ -19,6 +19,7 @@ from config import settings
 from kitchen.config import kitchen_enabled, kitchen_settings
 from notifications import LeadPayload, notify_website_lead
 from storage import init_db, save_lead
+from yougile import create_website_lead_task, yougile_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ async def health() -> dict[str, object]:
         "lead_bot": True,
         "kitchen_bot": kitchen_bot is not None,
         "webhook_base": bool(settings.resolved_webhook_base()),
+        "yougile": yougile_enabled(),
     }
 
 
@@ -174,11 +176,23 @@ async def submit_lead(payload: LeadPayload, request: Request) -> dict[str, str]:
         ip=ip,
     )
 
-    // Lead is already in SQLite — never fail the HTTP response solely on Telegram.
+    # Lead is already in SQLite — never fail the HTTP response solely on Telegram/CRM.
     try:
         await notify_website_lead(payload, lead_id)
     except Exception:
         logger.exception("Telegram notify failed for lead_id=%s (lead already saved)", lead_id)
+
+    try:
+        await create_website_lead_task(
+            lead_id=lead_id,
+            name=payload.name.strip(),
+            phone=payload.phone.strip(),
+            email=(payload.email or "").strip() or None,
+            service=payload.service.strip(),
+            message=(payload.message or "").strip() or None,
+        )
+    except Exception:
+        logger.exception("YouGile sync failed for lead_id=%s", lead_id)
 
     logger.info("Lead #%s saved", lead_id)
     return {"status": "ok"}

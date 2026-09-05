@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     )
     rate_limit_seconds: int = Field(default=30, description="Min seconds between submissions per IP")
 
+    # YouGile CRM (https://ru.yougile.com/api-v2)
+    yougile_api_key: str = Field(default="", description="YouGile Bearer API key")
+    yougile_column_id: str = Field(default="", description="YouGile column UUID for new leads")
+    yougile_api_base: str = Field(
+        default="https://yougile.com/api-v2",
+        description="YouGile REST base URL",
+    )
+
     def resolved_webhook_base(self) -> str:
         """Prefer explicit WEBHOOK_BASE_URL, else Render's auto URL."""
         explicit = (self.webhook_base_url or "").strip().rstrip("/")
