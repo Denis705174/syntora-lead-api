@@ -13,7 +13,7 @@ from kitchen.ai import get_ai_response
 logger = logging.getLogger(__name__)
 
 DEMO_WELCOME = (
-    "👋 <b>MiniScribe Kitchen AI</b> — демо-версия AI-менеджера для мебельного бизнеса.\n\n"
+    "👋 <b>Syntora Kitchen AI</b> — демо-версия AI-менеджера для мебельного бизнеса.\n\n"
     "Напишите, как на обычной консультации: бюджет, сроки, пожелания по кухне. "
     "Покажу, как бот отрабатывает возражения и передаёт лид оператору."
 )
