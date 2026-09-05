@@ -7,6 +7,7 @@ import logging
 from aiogram import Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message
+from openai import RateLimitError
 
 from kitchen.ai import get_ai_response
 
@@ -36,6 +37,12 @@ async def handle_message(message: Message) -> None:
         await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
         reply = await get_ai_response(user_id=user_id, user_text=user_text)
         await message.answer(reply)
+    except RateLimitError:
+        logger.warning("Kitchen AI rate-limited for user_id=%s", user_id)
+        await message.answer(
+            "Сейчас высокая нагрузка на ИИ (лимит запросов). "
+            "Напишите через 30–60 секунд — или оставьте заявку на syntora.space / в @MegaPromptBot."
+        )
     except Exception as exc:
         logger.exception("Kitchen AI failed for user_id=%s err=%s", user_id, type(exc).__name__)
         await message.answer(

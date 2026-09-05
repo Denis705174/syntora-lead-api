@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections import defaultdict
 from typing import Any, Final
 
-from openai import AsyncOpenAI, BadRequestError
+from openai import AsyncOpenAI, BadRequestError, RateLimitError
 from openai.types.chat import ChatCompletion
 
 from kitchen.config import kitchen_settings
@@ -16,6 +17,9 @@ from notifications import notify_kitchen_lead
 from yougile import create_kitchen_lead_task
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_RETRY_BASE_SEC = 1.4
 
 SYSTEM_PROMPT: Final[str] = (
     "Ты — профессиональный, уверенный в себе менеджер по продажам кухонь на заказ. "
@@ -120,17 +124,27 @@ async def _create_completion(
     tool_choice: str,
 ) -> tuple[ChatCompletion, dict[str, Any]]:
     """Create a chat completion and return both parsed and raw JSON payloads."""
-    raw_response = await client.chat.completions.with_raw_response.create(
-        model=kitchen_settings.openai_model,
-        messages=messages,
-        tools=[SAVE_LEAD_TOOL],
-        tool_choice=tool_choice,
-    )
-    completion = raw_response.parse()
-    raw_payload = raw_response.http_response.json()
-    if not isinstance(raw_payload, dict):
-        raise RuntimeError("Gemini returned a non-object JSON payload")
-    return completion, raw_payload
+    last_error: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            raw_response = await client.chat.completions.with_raw_response.create(
+                model=kitchen_settings.openai_model,
+                messages=messages,
+                tools=[SAVE_LEAD_TOOL],
+                tool_choice=tool_choice,
+            )
+            completion = raw_response.parse()
+            raw_payload = raw_response.http_response.json()
+            if not isinstance(raw_payload, dict):
+                raise RuntimeError("Gemini returned a non-object JSON payload")
+            return completion, raw_payload
+        except RateLimitError as exc:
+            last_error = exc
+            delay = _RETRY_BASE_SEC * (2**attempt)
+            logger.warning("Gemini rate limit (attempt %s), sleep %.1fs", attempt + 1, delay)
+            await asyncio.sleep(delay)
+    assert last_error is not None
+    raise last_error
 
 
 async def _handle_save_lead(arguments_json: str) -> str:
