@@ -110,9 +110,8 @@ async def show_about(message: Message) -> None:
 async def show_site(message: Message) -> None:
     """Link to the main website."""
     await message.answer(
-        "🌐 Сайт Syntora Space пока на syntora.space "
-        "(новый домен — после покупки).\n\n"
-        "Форма на сайте работает так же — заявка сразу в Telegram.",
+        "🌐 Сайт: https://syntora.space\n\n"
+        "Форма на сайте работает так же — заявка сразу в Telegram менеджеру.",
         disable_web_page_preview=True,
     )
 
@@ -178,6 +177,7 @@ async def form_message(message: Message, state: FSMContext) -> None:
         username=message.from_user.username,
     )
 
+    notify_ok = True
     try:
         await notify_bot_lead(
             lead_id=lead_id,
@@ -189,6 +189,7 @@ async def form_message(message: Message, state: FSMContext) -> None:
             username=message.from_user.username,
         )
     except Exception:
+        notify_ok = False
         logger.exception("Failed to notify operator for lead_id=%s", lead_id)
 
     try:
@@ -204,15 +205,24 @@ async def form_message(message: Message, state: FSMContext) -> None:
         logger.exception("YouGile sync failed for bot lead_id=%s", lead_id)
 
     await state.clear()
-    await message.answer(
-        "✅ <b>Заявка отправлена!</b>\n\n"
-        f"Имя: {name}\n"
-        f"Контакт: {phone}\n\n"
-        "Менеджер Syntora Space свяжется с вами в ближайшее время.\n"
-        "Именно так работает контур, который мы настраиваем клиентам.",
-        parse_mode="HTML",
-        reply_markup=main_keyboard(),
-    )
+    if notify_ok:
+        await message.answer(
+            "✅ <b>Заявка отправлена!</b>\n\n"
+            f"Имя: {name}\n"
+            f"Контакт: {phone}\n\n"
+            "Менеджер Syntora Space свяжется с вами в ближайшее время.\n"
+            "Именно так работает контур, который мы настраиваем клиентам.",
+            parse_mode="HTML",
+            reply_markup=main_keyboard(),
+        )
+    else:
+        await message.answer(
+            "⚠️ Заявка сохранена, но мгновенный алерт менеджеру не ушёл.\n\n"
+            "Напишите напрямую в Telegram: https://t.me/syntora_space\n"
+            "или повторите позже — сервис на Render иногда просыпается.",
+            reply_markup=main_keyboard(),
+            disable_web_page_preview=True,
+        )
 
 
 async def fallback_text(message: Message, state: FSMContext) -> None:

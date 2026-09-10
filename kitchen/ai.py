@@ -65,6 +65,11 @@ LEAD_SAVED_FALLBACK: Final[str] = (
     "бесплатного замера или 3D-проекта."
 )
 
+LEAD_SAVE_FAILED: Final[str] = (
+    "Не удалось передать контакт менеджеру. "
+    "Напишите напрямую @syntora_space или оставьте заявку на syntora.space."
+)
+
 MAX_HISTORY_MESSAGES: Final[int] = 12
 
 _client: AsyncOpenAI | None = None
@@ -170,8 +175,10 @@ async def _handle_save_lead(arguments_json: str) -> str:
     except Exception:
         logger.exception("YouGile kitchen lead failed")
 
+    telegram_ok = False
     try:
         await notify_kitchen_lead(phone=phone, budget=budget, dimensions=dimensions)
+        telegram_ok = True
     except Exception:
         logger.exception("Telegram kitchen lead notify failed")
 
@@ -183,20 +190,25 @@ async def _handle_save_lead(arguments_json: str) -> str:
         except Exception:
             logger.exception("Google Sheets kitchen lead failed (non-fatal)")
 
+    any_ok = bool(yougile_id) or telegram_ok or sheets_ok
     logger.info(
-        "Kitchen lead saved: phone=%s yougile=%s sheets=%s",
+        "Kitchen lead saved: phone=%s yougile=%s telegram=%s sheets=%s ok=%s",
         phone,
         yougile_id,
+        telegram_ok,
         sheets_ok,
+        any_ok,
     )
     return json.dumps(
         {
-            "ok": True,
+            "ok": any_ok,
             "phone": phone,
             "budget": budget,
             "dimensions": dimensions,
             "yougile": bool(yougile_id),
+            "telegram": telegram_ok,
             "sheets": sheets_ok,
+            **({} if any_ok else {"error": "delivery_failed"}),
         },
         ensure_ascii=False,
     )
@@ -220,6 +232,7 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
 
     assistant_message = response.choices[0].message
     lead_saved = False
+    lead_delivery_failed = False
 
     if assistant_message.tool_calls:
         messages.append(_assistant_message_from_raw(raw_payload))
@@ -234,8 +247,11 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
             else:
                 tool_result = await _handle_save_lead(function.arguments or "{}")
                 try:
-                    if json.loads(tool_result).get("ok"):
+                    parsed = json.loads(tool_result)
+                    if parsed.get("ok"):
                         lead_saved = True
+                    elif parsed.get("error") == "delivery_failed":
+                        lead_delivery_failed = True
                 except json.JSONDecodeError:
                     pass
 
@@ -254,6 +270,11 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
             assistant_text = (follow_up.choices[0].message.content or "").strip()
         except (BadRequestError, RuntimeError) as exc:
             logger.warning("Follow-up after tool call failed (%s); using fallback", exc)
+            assistant_text = ""
+
+        if lead_delivery_failed and not lead_saved:
+            assistant_text = LEAD_SAVE_FAILED
+        elif not assistant_text:
             assistant_text = LEAD_SAVED_FALLBACK if lead_saved else ""
     else:
         assistant_text = (assistant_message.content or "").strip()
