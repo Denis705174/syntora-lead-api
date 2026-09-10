@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     bot_token: str = Field(min_length=1, description="Telegram Bot API token for notifications")
     chat_id: str = Field(min_length=1, description="Telegram chat/channel ID for lead alerts")
     allowed_origins: str = Field(
-        default="https://syntora.space,http://localhost:8080",
+        default="https://syntora.space,https://www.syntora.space,http://localhost:5173,http://localhost:8080",
         description="Comma-separated CORS origins",
     )
     db_path: str = Field(default="data/leads.db", description="SQLite database path")

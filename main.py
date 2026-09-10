@@ -83,7 +83,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
     allow_methods=["POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Accept"],
+    expose_headers=["*"],
 )
 
 
