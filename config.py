@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     yougile_api_key: str = Field(default="", description="YouGile Bearer API key")
     yougile_column_id: str = Field(default="", description="YouGile column UUID for new leads")
     yougile_api_base: str = Field(
-        default="https://yougile.com/api-v2",
-        description="YouGile REST base URL",
+        default="https://ru.yougile.com/api-v2",
+        description="YouGile REST base URL (RU cloud)",
     )
 
     def resolved_webhook_base(self) -> str:

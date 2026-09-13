@@ -13,7 +13,7 @@ import sys
 
 import httpx
 
-BASE = os.environ.get("YOUGILE_API_BASE", "https://yougile.com/api-v2").rstrip("/")
+BASE = os.environ.get("YOUGILE_API_BASE", "https://ru.yougile.com/api-v2").rstrip("/")
 
 
 def main() -> int:
