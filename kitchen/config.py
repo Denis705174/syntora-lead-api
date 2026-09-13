@@ -17,6 +17,11 @@ class KitchenSettings(BaseSettings):
     openai_model: str = Field(default="gemini-2.5-flash")
     spreadsheet_id: str = Field(default="", description="Google Sheets CRM ID or URL")
     google_creds_json: str = Field(default="", description="Service account JSON as string")
+    kitchen_message_limit: int = Field(
+        default=20,
+        ge=1,
+        description="Demo replies per user before the bot switches to the sales CTA",
+    )
 
 
 kitchen_settings = KitchenSettings()

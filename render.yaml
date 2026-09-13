@@ -54,6 +54,10 @@ services:
 
         sync: false
 
+      - key: KITCHEN_MESSAGE_LIMIT
+
+        value: "20"
+
       - key: OPENAI_API_KEY
 
         sync: false
