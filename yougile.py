@@ -43,6 +43,10 @@ async def create_task(*, title: str, description: str) -> str | None:
         "completed": False,
     }
 
+    assignee = settings.yougile_assignee_id.strip()
+    if assignee:
+        payload["assigned"] = [assignee]
+
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(_tasks_url(), headers=_headers(), json=payload)

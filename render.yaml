@@ -82,6 +82,10 @@ services:
 
         sync: false
 
+      - key: YOUGILE_ASSIGNEE_ID
+
+        sync: false
+
       - key: YOUGILE_API_BASE
 
         value: https://ru.yougile.com/api-v2
