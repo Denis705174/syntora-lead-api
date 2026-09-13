@@ -84,5 +84,5 @@ services:
 
       - key: YOUGILE_API_BASE
 
-        value: https://yougile.com/api-v2
+        value: https://ru.yougile.com/api-v2
 
