@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from typing import Any, Final
 
-from openai import AsyncOpenAI, BadRequestError, RateLimitError
+from openai import AsyncOpenAI, BadRequestError, NotFoundError, RateLimitError
 from openai.types.chat import ChatCompletion
 
 from kitchen.config import kitchen_settings
@@ -122,6 +122,15 @@ def _assistant_message_from_raw(raw_payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _model_candidates() -> list[str]:
+    """Primary model first, then the fallback alias — Google retires models regularly."""
+    names = [
+        kitchen_settings.openai_model.strip(),
+        kitchen_settings.openai_model_fallback.strip(),
+    ]
+    return [name for name in dict.fromkeys(names) if name]
+
+
 async def _create_completion(
     client: AsyncOpenAI,
     messages: list[dict[str, Any]],
@@ -130,24 +139,29 @@ async def _create_completion(
 ) -> tuple[ChatCompletion, dict[str, Any]]:
     """Create a chat completion and return both parsed and raw JSON payloads."""
     last_error: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
-        try:
-            raw_response = await client.chat.completions.with_raw_response.create(
-                model=kitchen_settings.openai_model,
-                messages=messages,
-                tools=[SAVE_LEAD_TOOL],
-                tool_choice=tool_choice,
-            )
-            completion = raw_response.parse()
-            raw_payload = raw_response.http_response.json()
-            if not isinstance(raw_payload, dict):
-                raise RuntimeError("Gemini returned a non-object JSON payload")
-            return completion, raw_payload
-        except RateLimitError as exc:
-            last_error = exc
-            delay = _RETRY_BASE_SEC * (2**attempt)
-            logger.warning("Gemini rate limit (attempt %s), sleep %.1fs", attempt + 1, delay)
-            await asyncio.sleep(delay)
+    for model in _model_candidates():
+        for attempt in range(_MAX_RETRIES):
+            try:
+                raw_response = await client.chat.completions.with_raw_response.create(
+                    model=model,
+                    messages=messages,
+                    tools=[SAVE_LEAD_TOOL],
+                    tool_choice=tool_choice,
+                )
+                completion = raw_response.parse()
+                raw_payload = raw_response.http_response.json()
+                if not isinstance(raw_payload, dict):
+                    raise RuntimeError("Gemini returned a non-object JSON payload")
+                return completion, raw_payload
+            except RateLimitError as exc:
+                last_error = exc
+                delay = _RETRY_BASE_SEC * (2**attempt)
+                logger.warning("Gemini rate limit (attempt %s), sleep %.1fs", attempt + 1, delay)
+                await asyncio.sleep(delay)
+            except NotFoundError as exc:
+                last_error = exc
+                logger.error("Gemini model %s unavailable: %s", model, exc)
+                break
     assert last_error is not None
     raise last_error
 

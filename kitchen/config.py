@@ -14,7 +14,11 @@ class KitchenSettings(BaseSettings):
     openai_base_url: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
-    openai_model: str = Field(default="gemini-2.5-flash")
+    openai_model: str = Field(default="gemini-3.5-flash")
+    openai_model_fallback: str = Field(
+        default="gemini-flash-latest",
+        description="Used when the primary model is retired (Gemini answers 404)",
+    )
     spreadsheet_id: str = Field(default="", description="Google Sheets CRM ID or URL")
     google_creds_json: str = Field(default="", description="Service account JSON as string")
     kitchen_message_limit: int = Field(

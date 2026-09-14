@@ -68,7 +68,11 @@ services:
 
       - key: OPENAI_MODEL
 
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash
+
+      - key: OPENAI_MODEL_FALLBACK
+
+        value: gemini-flash-latest
 
       - key: SPREADSHEET_ID
 
