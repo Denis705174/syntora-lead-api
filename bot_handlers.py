@@ -72,6 +72,7 @@ def service_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Разбор воронки", callback_data="svc:consult")],
             [InlineKeyboardButton(text="AI-сотрудник", callback_data="svc:ai-employee")],
             [InlineKeyboardButton(text="AI-лендинг", callback_data="svc:landing")],
+            [InlineKeyboardButton(text="Сайт или лендинг", callback_data="svc:website")],
             [InlineKeyboardButton(text="Другое", callback_data="svc:other")],
         ]
     )
