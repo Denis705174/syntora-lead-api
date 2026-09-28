@@ -25,7 +25,10 @@ class KitchenSettings(BaseSettings):
     )
     backup_ai_api_key: str = Field(default="", description="Key for the backup provider (empty = off)")
     backup_ai_models: str = Field(
-        default="qwen/qwen3.8-27b:free,google/gemma-4-31b-it:free",
+        default=(
+            "inclusionai/ling-3.0-flash-sante:free,qwen/qwen3.8-27b:free,"
+            "dots-studio/dots-3-note-preview:free"
+        ),
         description="Comma-separated backup models",
     )
     spreadsheet_id: str = Field(default="", description="Google Sheets CRM ID or URL")
