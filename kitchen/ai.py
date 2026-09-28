@@ -138,6 +138,8 @@ def _model_candidates() -> list[str]:
     names = [
         kitchen_settings.openai_model.strip(),
         kitchen_settings.openai_model_fallback.strip(),
+        # Lite tier is usually spared when flash models return 503 "high demand".
+        "gemini-flash-lite-latest",
     ]
     return [name for name in dict.fromkeys(names) if name]
 
