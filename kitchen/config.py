@@ -14,10 +14,19 @@ class KitchenSettings(BaseSettings):
     openai_base_url: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
-    openai_model: str = Field(default="gemini-3.5-flash")
+    openai_model: str = Field(default="gemini-3.6-flash")
     openai_model_fallback: str = Field(
-        default="gemini-flash-latest",
-        description="Used when the primary model is retired (Gemini answers 404)",
+        default="gemini-3.1-flash-lite,gemini-flash-latest",
+        description="Comma-separated models tried after the primary on 404/5xx/timeout",
+    )
+    backup_ai_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="Second OpenAI-compatible provider used when every Gemini model fails",
+    )
+    backup_ai_api_key: str = Field(default="", description="Key for the backup provider (empty = off)")
+    backup_ai_models: str = Field(
+        default="qwen/qwen3.8-27b:free,google/gemma-4-31b-it:free",
+        description="Comma-separated backup models",
     )
     spreadsheet_id: str = Field(default="", description="Google Sheets CRM ID or URL")
     google_creds_json: str = Field(default="", description="Service account JSON as string")

@@ -1,7 +1,7 @@
 """Upload lead-api to the REG.Cloud VPS and install nginx + systemd.
 
 Secrets come from env:
-  VPS_HOST, VPS_USER, VPS_PASSWORD
+  VPS_HOST, VPS_USER, VPS_KEY (default ~/.ssh/syntora_vps) or VPS_PASSWORD
   RENDER_API_KEY (to copy production secrets)
 """
 
@@ -27,17 +27,15 @@ SKIP_SUFFIXES = {".pyc", ".db"}
 def ssh_connect() -> paramiko.SSHClient:
     host = os.environ["VPS_HOST"]
     user = os.environ.get("VPS_USER", "root")
-    password = os.environ["VPS_PASSWORD"]
+    key_file = os.environ.get("VPS_KEY", str(Path.home() / ".ssh" / "syntora_vps"))
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        host,
-        username=user,
-        password=password,
-        timeout=30,
-        allow_agent=False,
-        look_for_keys=False,
-    )
+    if Path(key_file).is_file():
+        client.connect(host, username=user, key_filename=key_file, timeout=30,
+                       allow_agent=False, look_for_keys=False)
+    else:
+        client.connect(host, username=user, password=os.environ["VPS_PASSWORD"], timeout=30,
+                       allow_agent=False, look_for_keys=False)
     return client
 
 
@@ -120,6 +118,8 @@ def build_env_file(render: dict[str, str]) -> str:
         # Keep empty: this REG.Cloud DC cannot reach api.telegram.org, so bots stay on Render.
         "WEBHOOK_BASE_URL": "",
         "TELEGRAM_NOTIFY": "false",
+        "LEAD_RELAY_URL": "https://syntora-lead-api-1.onrender.com/internal/lead-notify",
+        "LEAD_RELAY_SECRET": render.get("LEAD_RELAY_SECRET", ""),
         "KITCHEN_BOT_TOKEN": render.get("KITCHEN_BOT_TOKEN", ""),
         "KITCHEN_MESSAGE_LIMIT": render.get("KITCHEN_MESSAGE_LIMIT", "20"),
         "OPENAI_API_KEY": render.get("OPENAI_API_KEY", ""),
@@ -127,8 +127,8 @@ def build_env_file(render: dict[str, str]) -> str:
             "OPENAI_BASE_URL",
             "https://generativelanguage.googleapis.com/v1beta/openai/",
         ),
-        "OPENAI_MODEL": render.get("OPENAI_MODEL", "gemini-3.5-flash"),
-        "OPENAI_MODEL_FALLBACK": render.get("OPENAI_MODEL_FALLBACK", "gemini-flash-latest"),
+        "OPENAI_MODEL": render.get("OPENAI_MODEL", "gemini-3.6-flash"),
+        "OPENAI_MODEL_FALLBACK": render.get("OPENAI_MODEL_FALLBACK", "gemini-3.1-flash-lite"),
         "SPREADSHEET_ID": render.get("SPREADSHEET_ID", ""),
         "GOOGLE_CREDS_JSON": render.get("GOOGLE_CREDS_JSON", ""),
         "YOUGILE_API_KEY": render.get("YOUGILE_API_KEY", ""),
@@ -136,7 +136,8 @@ def build_env_file(render: dict[str, str]) -> str:
         "YOUGILE_ASSIGNEE_ID": render.get("YOUGILE_ASSIGNEE_ID", ""),
         "YOUGILE_API_BASE": render.get("YOUGILE_API_BASE", "https://ru.yougile.com/api-v2"),
     }
-    missing = [k for k, v in values.items() if not v and k in {"BOT_TOKEN", "KITCHEN_BOT_TOKEN", "OPENAI_API_KEY"}]
+    required = {"BOT_TOKEN", "KITCHEN_BOT_TOKEN", "OPENAI_API_KEY", "LEAD_RELAY_SECRET"}
+    missing = [k for k, v in values.items() if not v and k in required]
     if missing:
         raise RuntimeError(f"missing secrets from Render: {missing}")
     return "\n".join(f"{key}={quote_env(val)}" for key, val in values.items()) + "\n"

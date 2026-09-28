@@ -1,6 +1,6 @@
 """Install a systemd timer on the VPS that keeps the Render bots awake.
 
-Env: VPS_HOST, VPS_PASSWORD (VPS_USER defaults to root).
+Env: VPS_HOST, VPS_KEY (default ~/.ssh/syntora_vps) or VPS_PASSWORD; VPS_USER defaults to root.
 """
 
 from __future__ import annotations
@@ -33,11 +33,15 @@ WantedBy=timers.target
 def main() -> None:
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    key_file = os.environ.get("VPS_KEY", os.path.expanduser("~/.ssh/syntora_vps"))
+    auth = {"key_filename": key_file} if os.path.isfile(key_file) else {"password": os.environ["VPS_PASSWORD"]}
     ssh.connect(
         os.environ["VPS_HOST"],
         username=os.environ.get("VPS_USER", "root"),
-        password=os.environ["VPS_PASSWORD"],
         timeout=30,
+        allow_agent=False,
+        look_for_keys=False,
+        **auth,
     )
     sftp = ssh.open_sftp()
     for name, body in (("render-keepalive.service", SERVICE), ("render-keepalive.timer", TIMER)):

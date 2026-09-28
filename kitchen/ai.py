@@ -25,7 +25,7 @@ from yougile import create_kitchen_lead_task
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 3
+_MAX_RETRIES = 2
 _RETRY_BASE_SEC = 1.4
 # Telegram redelivers a webhook update after ~60 s, so one reply must stay well below that.
 _REQUEST_TIMEOUT_SEC = 20.0
@@ -82,6 +82,7 @@ LEAD_SAVE_FAILED: Final[str] = (
 MAX_HISTORY_MESSAGES: Final[int] = 12
 
 _client: AsyncOpenAI | None = None
+_backup_client: AsyncOpenAI | None = None
 _conversation_history: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
 
@@ -96,6 +97,23 @@ def _get_client() -> AsyncOpenAI:
             max_retries=0,
         )
     return _client
+
+
+def _get_backup_client() -> AsyncOpenAI | None:
+    """OpenAI-compatible backup provider (OpenRouter by default); None when no key is set."""
+    global _backup_client
+    if _backup_client is None and kitchen_settings.backup_ai_api_key.strip():
+        _backup_client = AsyncOpenAI(
+            api_key=kitchen_settings.backup_ai_api_key.strip(),
+            base_url=kitchen_settings.backup_ai_base_url,
+            timeout=_REQUEST_TIMEOUT_SEC,
+            max_retries=0,
+        )
+    return _backup_client
+
+
+def _split(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _trim_history(user_id: int) -> None:
@@ -133,26 +151,24 @@ def _assistant_message_from_raw(raw_payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _model_candidates() -> list[str]:
-    """Primary model first, then the fallback alias — Google retires models regularly."""
-    names = [
-        kitchen_settings.openai_model.strip(),
-        kitchen_settings.openai_model_fallback.strip(),
-        # Lite tier is usually spared when flash models return 503 "high demand".
-        "gemini-flash-lite-latest",
-    ]
-    return [name for name in dict.fromkeys(names) if name]
+def _model_candidates() -> list[tuple[AsyncOpenAI, str]]:
+    """Gemini models first (Google retires/overloads them often), then the backup provider."""
+    gemini = [kitchen_settings.openai_model, *_split(kitchen_settings.openai_model_fallback)]
+    candidates = [(_get_client(), name.strip()) for name in dict.fromkeys(gemini) if name.strip()]
+    backup = _get_backup_client()
+    if backup is not None:
+        candidates += [(backup, name) for name in _split(kitchen_settings.backup_ai_models)]
+    return candidates
 
 
 async def _create_completion(
-    client: AsyncOpenAI,
     messages: list[dict[str, Any]],
     *,
     tool_choice: str,
 ) -> tuple[ChatCompletion, dict[str, Any]]:
     """Create a chat completion and return both parsed and raw JSON payloads."""
     last_error: Exception | None = None
-    for model in _model_candidates():
+    for client, model in _model_candidates():
         for attempt in range(_MAX_RETRIES):
             try:
                 raw_response = await client.chat.completions.with_raw_response.create(
@@ -163,31 +179,35 @@ async def _create_completion(
                 )
                 completion = raw_response.parse()
                 raw_payload = raw_response.http_response.json()
-                if not isinstance(raw_payload, dict):
-                    raise RuntimeError("Gemini returned a non-object JSON payload")
+                if not isinstance(raw_payload, dict) or not completion.choices:
+                    raise RuntimeError(f"AI model {model} returned an empty payload")
                 return completion, raw_payload
             except RateLimitError as exc:
                 last_error = exc
-                delay = _RETRY_BASE_SEC * (2**attempt)
-                logger.warning("Gemini rate limit (attempt %s), sleep %.1fs", attempt + 1, delay)
-                await asyncio.sleep(delay)
+                logger.warning("AI %s rate limit (attempt %s)", model, attempt + 1)
+                if attempt + 1 < _MAX_RETRIES:
+                    await asyncio.sleep(_RETRY_BASE_SEC * (2**attempt))
             except NotFoundError as exc:
                 last_error = exc
-                logger.error("Gemini model %s unavailable: %s", model, exc)
+                logger.error("AI model %s unavailable: %s", model, exc)
                 break
             except APIConnectionError as exc:
                 last_error = exc
-                logger.warning("Gemini %s connection/timeout error (attempt %s)", model, attempt + 1)
+                logger.warning("AI %s connection/timeout error (attempt %s)", model, attempt + 1)
                 break
             except APIStatusError as exc:
-                if exc.status_code < 500:
-                    raise
                 last_error = exc
-                logger.warning("Gemini %s HTTP %s (attempt %s)", model, exc.status_code, attempt + 1)
+                logger.warning("AI %s HTTP %s (attempt %s)", model, exc.status_code, attempt + 1)
+                if exc.status_code < 500:
+                    break
                 if attempt + 1 < _MAX_RETRIES:
                     await asyncio.sleep(_RETRY_BASE_SEC)
+            except RuntimeError as exc:
+                last_error = exc
+                logger.warning("%s", exc)
+                break
     if last_error is None:
-        raise RuntimeError("No Gemini model configured")
+        raise RuntimeError("No AI model configured")
     raise last_error
 
 
@@ -255,7 +275,6 @@ async def _handle_save_lead(arguments_json: str) -> str:
 
 async def get_ai_response(user_id: int, user_text: str) -> str:
     """Send user text to Gemini and return the model reply."""
-    client = _get_client()
     history = _conversation_history[user_id]
 
     messages: list[dict[str, Any]] = [
@@ -264,7 +283,7 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
         {"role": "user", "content": user_text},
     ]
 
-    response, raw_payload = await _create_completion(client, messages, tool_choice="auto")
+    response, raw_payload = await _create_completion(messages, tool_choice="auto")
 
     if not response.choices:
         raise RuntimeError("Gemini returned an empty choices list")
@@ -303,7 +322,7 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
             )
 
         try:
-            follow_up, _ = await _create_completion(client, messages, tool_choice="none")
+            follow_up, _ = await _create_completion(messages, tool_choice="none")
             if not follow_up.choices or follow_up.choices[0].message is None:
                 raise RuntimeError("Gemini follow-up returned empty choices")
             assistant_text = (follow_up.choices[0].message.content or "").strip()

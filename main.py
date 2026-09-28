@@ -11,6 +11,7 @@ import time
 from collections import OrderedDict, defaultdict
 from contextlib import asynccontextmanager
 
+import httpx
 from aiogram import Bot
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
@@ -227,6 +228,43 @@ async def kitchen_webhook(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
+def _relay_secret() -> str:
+    return os.environ.get("LEAD_RELAY_SECRET", "").strip()
+
+
+async def _relay_lead_notify(url: str, payload: LeadPayload, lead_id: int) -> None:
+    """VPS side: its DC cannot reach api.telegram.org, so Render sends the alert."""
+    body = {"lead_id": lead_id, "lead": payload.model_dump(by_alias=True)}
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                response = await client.post(url, json=body, headers={"x-relay-secret": _relay_secret()})
+            response.raise_for_status()
+            logger.info("Lead #%s relayed to Telegram", lead_id)
+            return
+        except Exception as exc:
+            logger.warning("Lead #%s relay attempt %s failed: %s", lead_id, attempt + 1, type(exc).__name__)
+            await asyncio.sleep(10 * (attempt + 1))
+    logger.error("Lead #%s relay gave up (lead is saved in SQLite and YouGile)", lead_id)
+
+
+@app.post("/internal/lead-notify")
+async def lead_notify_relay(request: Request) -> dict[str, bool]:
+    """Render side of the relay: forward a VPS-saved website lead to the operator chat."""
+    secret = _relay_secret()
+    received = request.headers.get("x-relay-secret", "")
+    if not secret or not hmac.compare_digest(received, secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    body = await request.json()
+    try:
+        payload = LeadPayload.model_validate(body["lead"])
+        lead_id = int(body["lead_id"])
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Invalid relay payload") from exc
+    await notify_website_lead(payload, lead_id)
+    return {"ok": True}
+
+
 @app.post("/api/lead")
 async def submit_lead(payload: LeadPayload, request: Request) -> dict[str, str]:
     """Accept a website lead, store locally, and notify via Telegram."""
@@ -256,7 +294,10 @@ async def submit_lead(payload: LeadPayload, request: Request) -> dict[str, str]:
         "no",
         "off",
     }
-    if telegram_notify:
+    relay_url = os.environ.get("LEAD_RELAY_URL", "").strip()
+    if relay_url:
+        _process_in_background("Lead relay", _relay_lead_notify(relay_url, payload, lead_id))
+    elif telegram_notify:
         try:
             await notify_website_lead(payload, lead_id)
         except Exception:
