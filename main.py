@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import hmac
 import logging
+import os
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from contextlib import asynccontextmanager
 
 from aiogram import Bot
@@ -36,11 +40,58 @@ if kitchen_enabled():
     kitchen_bot = Bot(token=kitchen_settings.kitchen_bot_token)
     kitchen_dp = build_kitchen_dispatcher()
 
+_SEEN_UPDATES_MAX = 2000
+_seen_updates: dict[str, OrderedDict[int, None]] = defaultdict(OrderedDict)
+# Enforced only after set_webhook succeeded in this process; otherwise Telegram
+# may still deliver with an older (or no) secret and the bot would go silent.
+_secret_enforced: dict[str, bool] = {"lead": False, "kitchen": False}
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _webhook_secret(token: str) -> str:
+    """Stable per-bot secret derived from the token (Telegram allows [A-Za-z0-9_-], 1-256)."""
+    explicit = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    seed = f"{explicit}:{token}" if explicit else token
+    return hashlib.sha256(f"syntora-webhook:{seed}".encode()).hexdigest()
+
+
+def _authorized(name: str, token: str, request: Request) -> bool:
+    if not _secret_enforced[name]:
+        return True
+    received = request.headers.get("x-telegram-bot-api-secret-token", "")
+    return hmac.compare_digest(received, _webhook_secret(token))
+
+
+def _is_duplicate(name: str, update_id: int) -> bool:
+    seen = _seen_updates[name]
+    if update_id in seen:
+        return True
+    seen[update_id] = None
+    if len(seen) > _SEEN_UPDATES_MAX:
+        seen.popitem(last=False)
+    return False
+
+
+def _process_in_background(label: str, coro) -> None:
+    """Answer Telegram immediately; slow AI/CRM work must not trigger redelivery."""
+
+    async def runner() -> None:
+        try:
+            await coro
+        except Exception:
+            logger.exception("%s webhook handler failed", label)
+
+    task = asyncio.create_task(runner())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize databases and register Telegram webhooks."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+    # httpx INFO lines contain full request URLs, i.e. bot tokens.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     init_db(settings.db_path)
     init_bot_db(settings.bot_db_path)
     logger.info("Lead API started, db=%s bot_db=%s", settings.db_path, settings.bot_db_path)
@@ -49,22 +100,32 @@ async def lifespan(app: FastAPI):
     if webhook_base:
         # drop_pending_updates=False: on Render free cold-start the wake-up
         # message must not be discarded, or bots look "silent".
-        lead_webhook = f"{webhook_base}/telegram/webhook"
-        await bot.set_webhook(
-            url=lead_webhook,
-            drop_pending_updates=False,
-            allowed_updates=["message", "callback_query"],
-        )
-        logger.info("Lead bot webhook set: %s", lead_webhook)
-
-        if kitchen_bot is not None and kitchen_dp is not None:
-            kitchen_webhook = f"{webhook_base}/telegram/kitchen-webhook"
-            await kitchen_bot.set_webhook(
-                url=kitchen_webhook,
+        try:
+            lead_webhook = f"{webhook_base}/telegram/webhook"
+            await bot.set_webhook(
+                url=lead_webhook,
                 drop_pending_updates=False,
                 allowed_updates=["message", "callback_query"],
+                secret_token=_webhook_secret(settings.bot_token),
             )
-            logger.info("Kitchen bot webhook set: %s", kitchen_webhook)
+            _secret_enforced["lead"] = True
+            logger.info("Lead bot webhook set: %s", lead_webhook)
+        except Exception:
+            logger.exception("Lead bot webhook registration failed")
+
+        if kitchen_bot is not None and kitchen_dp is not None:
+            try:
+                kitchen_webhook = f"{webhook_base}/telegram/kitchen-webhook"
+                await kitchen_bot.set_webhook(
+                    url=kitchen_webhook,
+                    drop_pending_updates=False,
+                    allowed_updates=["message", "callback_query"],
+                    secret_token=_webhook_secret(kitchen_settings.kitchen_bot_token),
+                )
+                _secret_enforced["kitchen"] = True
+                logger.info("Kitchen bot webhook set: %s", kitchen_webhook)
+            except Exception:
+                logger.exception("Kitchen bot webhook registration failed")
     else:
         logger.warning("WEBHOOK_BASE_URL / RENDER_EXTERNAL_URL empty — webhooks not registered")
 
@@ -89,6 +150,9 @@ app.add_middleware(
 
 
 def _client_ip(request: Request) -> str:
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -131,13 +195,17 @@ async def health() -> dict[str, object]:
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request) -> dict[str, bool]:
     """Receive Telegram updates for @MegaPromptBot (no polling needed)."""
-    payload = await request.json()
+    if not _authorized("lead", settings.bot_token, request):
+        raise HTTPException(status_code=403, detail="Forbidden")
     try:
-        update = Update.model_validate(payload)
-        logger.info("Lead update id=%s", update.update_id)
-        await dp.feed_update(bot, update)
+        update = Update.model_validate(await request.json())
     except Exception:
-        logger.exception("Lead webhook handler failed")
+        logger.exception("Lead webhook: invalid update payload")
+        return {"ok": True}
+    if _is_duplicate("lead", update.update_id):
+        return {"ok": True}
+    logger.info("Lead update id=%s", update.update_id)
+    _process_in_background("Lead", dp.feed_update(bot, update))
     return {"ok": True}
 
 
@@ -146,12 +214,16 @@ async def kitchen_webhook(request: Request) -> dict[str, bool]:
     """Receive Telegram updates for @iogram3x_bot (Kitchen AI demo)."""
     if kitchen_bot is None or kitchen_dp is None:
         raise HTTPException(status_code=503, detail="Kitchen bot not configured")
-    payload = await request.json()
+    if not _authorized("kitchen", kitchen_settings.kitchen_bot_token, request):
+        raise HTTPException(status_code=403, detail="Forbidden")
     try:
-        update = Update.model_validate(payload)
-        await kitchen_dp.feed_update(kitchen_bot, update)
+        update = Update.model_validate(await request.json())
     except Exception:
-        logger.exception("Kitchen webhook handler failed")
+        logger.exception("Kitchen webhook: invalid update payload")
+        return {"ok": True}
+    if _is_duplicate("kitchen", update.update_id):
+        return {"ok": True}
+    _process_in_background("Kitchen", kitchen_dp.feed_update(kitchen_bot, update))
     return {"ok": True}
 
 
@@ -178,10 +250,19 @@ async def submit_lead(payload: LeadPayload, request: Request) -> dict[str, str]:
     )
 
     # Lead is already in SQLite — never fail the HTTP response solely on Telegram/CRM.
-    try:
-        await notify_website_lead(payload, lead_id)
-    except Exception:
-        logger.exception("Telegram notify failed for lead_id=%s (lead already saved)", lead_id)
+    telegram_notify = os.environ.get("TELEGRAM_NOTIFY", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if telegram_notify:
+        try:
+            await notify_website_lead(payload, lead_id)
+        except Exception:
+            logger.exception("Telegram notify failed for lead_id=%s (lead already saved)", lead_id)
+    else:
+        logger.info("Telegram notify skipped for lead_id=%s", lead_id)
 
     try:
         await create_website_lead_task(

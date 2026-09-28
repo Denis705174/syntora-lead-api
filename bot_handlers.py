@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import html
 import logging
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -120,8 +122,8 @@ async def show_site(message: Message) -> None:
 async def form_name(message: Message, state: FSMContext) -> None:
     """Save name and ask for phone."""
     name = (message.text or "").strip()
-    if len(name) < 2:
-        await message.answer("Укажите имя хотя бы из 2 символов.")
+    if not 2 <= len(name) <= 80:
+        await message.answer("Укажите имя от 2 до 80 символов.")
         return
     await state.update_data(name=name)
     await state.set_state(LeadForm.phone)
@@ -131,8 +133,8 @@ async def form_name(message: Message, state: FSMContext) -> None:
 async def form_phone(message: Message, state: FSMContext) -> None:
     """Save phone and ask for service."""
     phone = (message.text or "").strip()
-    if len(phone) < 3:
-        await message.answer("Укажите телефон или @username.")
+    if not 3 <= len(phone) <= 80:
+        await message.answer("Укажите телефон или @username (до 80 символов).")
         return
     await state.update_data(phone=phone)
     await state.set_state(LeadForm.service)
@@ -148,7 +150,10 @@ async def form_service_callback(callback: CallbackQuery, state: FSMContext) -> N
     await state.set_state(LeadForm.message)
     await callback.answer()
     if callback.message:
-        await callback.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
         await callback.message.answer(
             "Шаг 4 из 4: кратко опишите задачу\n(или отправьте «—», если пока нечего добавить)."
         )
@@ -209,8 +214,8 @@ async def form_message(message: Message, state: FSMContext) -> None:
     if notify_ok:
         await message.answer(
             "✅ <b>Заявка отправлена!</b>\n\n"
-            f"Имя: {name}\n"
-            f"Контакт: {phone}\n\n"
+            f"Имя: {html.escape(name)}\n"
+            f"Контакт: {html.escape(phone)}\n\n"
             "Менеджер Syntora Space свяжется с вами в ближайшее время.\n"
             "Именно так работает контур, который мы настраиваем клиентам.",
             parse_mode="HTML",
@@ -238,6 +243,11 @@ async def fallback_text(message: Message, state: FSMContext) -> None:
     )
 
 
+async def stale_callback(callback: CallbackQuery) -> None:
+    """Answer buttons from an expired form so the client stops spinning."""
+    await callback.answer("Форма устарела — нажмите «📝 Оставить заявку» ещё раз.", show_alert=False)
+
+
 def build_dispatcher(storage: BaseStorage | None = None) -> Dispatcher:
     """Register all bot handlers."""
     dp = Dispatcher(storage=storage or MemoryStorage())
@@ -251,6 +261,7 @@ def build_dispatcher(storage: BaseStorage | None = None) -> Dispatcher:
     dp.message.register(form_phone, StateFilter(LeadForm.phone), F.text)
     dp.message.register(form_message, StateFilter(LeadForm.message), F.text)
     dp.callback_query.register(form_service_callback, StateFilter(LeadForm.service))
+    dp.callback_query.register(stale_callback)
     dp.message.register(fallback_text, F.text)
 
     return dp

@@ -8,7 +8,14 @@ import logging
 from collections import defaultdict
 from typing import Any, Final
 
-from openai import AsyncOpenAI, BadRequestError, NotFoundError, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    AsyncOpenAI,
+    NotFoundError,
+    RateLimitError,
+)
 from openai.types.chat import ChatCompletion
 
 from kitchen.config import kitchen_settings
@@ -20,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _RETRY_BASE_SEC = 1.4
+# Telegram redelivers a webhook update after ~60 s, so one reply must stay well below that.
+_REQUEST_TIMEOUT_SEC = 20.0
 
 SYSTEM_PROMPT: Final[str] = (
     "Ты — профессиональный, уверенный в себе менеджер по продажам кухонь на заказ. "
@@ -83,6 +92,8 @@ def _get_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             api_key=kitchen_settings.openai_api_key,
             base_url=kitchen_settings.openai_base_url,
+            timeout=_REQUEST_TIMEOUT_SEC,
+            max_retries=0,
         )
     return _client
 
@@ -162,7 +173,19 @@ async def _create_completion(
                 last_error = exc
                 logger.error("Gemini model %s unavailable: %s", model, exc)
                 break
-    assert last_error is not None
+            except APIConnectionError as exc:
+                last_error = exc
+                logger.warning("Gemini %s connection/timeout error (attempt %s)", model, attempt + 1)
+                break
+            except APIStatusError as exc:
+                if exc.status_code < 500:
+                    raise
+                last_error = exc
+                logger.warning("Gemini %s HTTP %s (attempt %s)", model, exc.status_code, attempt + 1)
+                if attempt + 1 < _MAX_RETRIES:
+                    await asyncio.sleep(_RETRY_BASE_SEC)
+    if last_error is None:
+        raise RuntimeError("No Gemini model configured")
     raise last_error
 
 
@@ -282,7 +305,7 @@ async def get_ai_response(user_id: int, user_text: str) -> str:
             if not follow_up.choices or follow_up.choices[0].message is None:
                 raise RuntimeError("Gemini follow-up returned empty choices")
             assistant_text = (follow_up.choices[0].message.content or "").strip()
-        except (BadRequestError, RuntimeError) as exc:
+        except (APIError, RuntimeError) as exc:
             logger.warning("Follow-up after tool call failed (%s); using fallback", exc)
             assistant_text = ""
 
