@@ -230,6 +230,10 @@ python3 -m venv /opt/syntora/lead-api/.venv
 /opt/syntora/lead-api/.venv/bin/pip install -r /opt/syntora/lead-api/requirements.txt
 rm -f /etc/nginx/sites-enabled/default
 ln -sfn /etc/nginx/sites-available/syntora-api /etc/nginx/sites-enabled/syntora-api
+# The template above is HTTP-only; re-attach the existing Let's Encrypt cert or HTTPS goes down.
+if [ -d /etc/letsencrypt/live/api.syntora.space ]; then
+  certbot install --nginx --cert-name api.syntora.space --redirect --non-interactive
+fi
 nginx -t
 systemctl daemon-reload
 systemctl enable --now syntora-lead-api
@@ -239,7 +243,7 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 systemctl restart syntora-lead-api nginx
-sleep 2
+for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS http://127.0.0.1:8080/health
 echo
 systemctl is-active syntora-lead-api nginx

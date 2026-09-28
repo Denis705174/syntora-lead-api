@@ -140,7 +140,14 @@ async def lifespan(app: FastAPI):
     logger.info("Lead API stopped")
 
 
-app = FastAPI(title="Syntora Lead API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Syntora Lead API",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
