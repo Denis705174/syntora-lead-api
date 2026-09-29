@@ -251,8 +251,8 @@ async def _handle_save_lead(arguments_json: str) -> str:
 
     any_ok = bool(yougile_id) or telegram_ok or sheets_ok
     logger.info(
-        "Kitchen lead saved: phone=%s yougile=%s telegram=%s sheets=%s ok=%s",
-        phone,
+        "Kitchen lead saved: phone_len=%s yougile=%s telegram=%s sheets=%s ok=%s",
+        len(phone),
         yougile_id,
         telegram_ok,
         sheets_ok,

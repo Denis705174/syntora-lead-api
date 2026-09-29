@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import html
-
 import httpx
 from pydantic import BaseModel, Field
 
@@ -51,23 +49,9 @@ async def _send_html(text: str) -> None:
 
 
 async def notify_website_lead(payload: LeadPayload, lead_id: int) -> None:
-    """Notify operator about a syntora.space form submission."""
-    service_label = SERVICE_LABELS.get(payload.service, payload.service)
-    lines = [
-        f"🆕 <b>Заявка #{lead_id} с сайта Syntora Space</b>",
-        "",
-        f"<b>Имя:</b> {html.escape(payload.name)}",
-        f"<b>Контакт:</b> {html.escape(payload.phone)}",
-    ]
-    if payload.email:
-        lines.append(f"<b>Email:</b> {html.escape(payload.email)}")
-    lines.extend(
-        [
-            f"<b>Услуга:</b> {html.escape(service_label)}",
-            f"<b>Сообщение:</b> {html.escape(payload.message or '—')}",
-        ]
-    )
-    await _send_html("\n".join(lines))
+    """Alert operator without sending personal data over Telegram."""
+    del payload  # payload is validated upstream; PII stays in SQLite / YouGile.
+    await _send_html(f"🆕 <b>Новая заявка №{lead_id}</b>. Откройте CRM YouGile.")
 
 
 async def notify_bot_lead(
@@ -80,28 +64,12 @@ async def notify_bot_lead(
     user_id: int,
     username: str | None,
 ) -> None:
-    """Notify operator about a lead collected inside @MegaPromptBot."""
-    service_label = SERVICE_LABELS.get(service, service)
-    user_ref = f"@{username}" if username else f"id {user_id}"
-    lines = [
-        f"🆕 <b>Заявка #{lead_id} из Telegram-бота</b>",
-        "",
-        f"<b>Имя:</b> {html.escape(name)}",
-        f"<b>Контакт:</b> {html.escape(phone)}",
-        f"<b>Услуга:</b> {html.escape(service_label)}",
-        f"<b>Сообщение:</b> {html.escape(message or '—')}",
-        f"<b>Telegram:</b> {html.escape(user_ref)}",
-    ]
-    await _send_html("\n".join(lines))
+    """Alert operator without sending personal data over Telegram."""
+    del name, phone, service, message, user_id, username
+    await _send_html(f"🆕 <b>Новая заявка №{lead_id} из Telegram-бота</b>. Откройте CRM YouGile.")
 
 
 async def notify_kitchen_lead(*, phone: str, budget: str, dimensions: str) -> None:
-    """Notify operator about a Kitchen AI qualified lead."""
-    lines = [
-        "🆕 <b>Лид из Kitchen AI</b>",
-        "",
-        f"<b>Телефон:</b> {html.escape(phone)}",
-        f"<b>Бюджет:</b> {html.escape(budget)}",
-        f"<b>Размеры:</b> {html.escape(dimensions)}",
-    ]
-    await _send_html("\n".join(lines))
+    """Alert operator without sending personal data over Telegram."""
+    del phone, budget, dimensions
+    await _send_html("🆕 <b>Новый лид Kitchen AI</b>. Откройте CRM YouGile.")

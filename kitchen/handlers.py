@@ -6,7 +6,7 @@ import logging
 
 from aiogram import Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from openai import RateLimitError
 
 from kitchen.ai import get_ai_response
@@ -36,6 +36,7 @@ DEMO_LIMIT_NOTICE = (
 
 # In-memory counters: reset on restart, same lifetime as the dialogue history.
 _reply_counts: dict[int, int] = {}
+_pdn_ok: set[int] = set()
 
 
 def replies_used(user_id: int) -> int:
@@ -65,6 +66,27 @@ def contact_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def pdn_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Согласен", callback_data="kpdn:yes")],
+            [InlineKeyboardButton(text="Отказаться", callback_data="kpdn:no")],
+        ]
+    )
+
+
+async def ask_pdn(message: Message) -> None:
+    await message.answer(
+        "Перед началом работы нужно ваше согласие на обработку персональных данных:\n"
+        "https://syntora.space/consent.html\n"
+        "Политика: https://syntora.space/privacy.html\n\n"
+        "Нажимая «Согласен», вы даёте его. Без согласия бот не продолжит диалог.\n"
+        "Реальные заявки удобнее оставить на сайте: https://syntora.space/#contact",
+        reply_markup=pdn_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+
 async def handle_start(message: Message) -> None:
     """Send branded demo welcome on /start."""
     limit = kitchen_settings.kitchen_message_limit
@@ -75,7 +97,28 @@ async def handle_start(message: Message) -> None:
             reply_markup=contact_keyboard(),
         )
         return
+    if message.from_user is None or message.from_user.id not in _pdn_ok:
+        await ask_pdn(message)
+        return
     await message.answer(DEMO_WELCOME.format(limit=limit), parse_mode="HTML")
+
+
+async def consent_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.from_user is None or callback.message is None:
+        return
+    if callback.data == "kpdn:no":
+        _pdn_ok.discard(callback.from_user.id)
+        await callback.message.answer(
+            "Без согласия бот не продолжает диалог. Форма на сайте: https://syntora.space/#contact",
+            disable_web_page_preview=True,
+        )
+        return
+    _pdn_ok.add(callback.from_user.id)
+    await callback.message.answer(
+        DEMO_WELCOME.format(limit=kitchen_settings.kitchen_message_limit),
+        parse_mode="HTML",
+    )
 
 
 async def handle_message(message: Message) -> None:
@@ -86,6 +129,10 @@ async def handle_message(message: Message) -> None:
     user_text = message.text or ""
     user_id = message.from_user.id
     limit = kitchen_settings.kitchen_message_limit
+
+    if user_id not in _pdn_ok:
+        await ask_pdn(message)
+        return
 
     if demo_limit_reached(user_id):
         logger.info("Kitchen AI demo limit hit for user_id=%s", user_id)
@@ -125,6 +172,7 @@ def build_kitchen_dispatcher() -> Dispatcher:
     """Register Kitchen AI handlers."""
     dp = Dispatcher()
     dp.message.register(handle_start, CommandStart())
+    dp.callback_query.register(consent_callback, F.data.in_({"kpdn:yes", "kpdn:no"}))
     # Exclude slash-commands; bare Command() raises in current aiogram.
     dp.message.register(handle_message, F.text, ~F.text.startswith("/"))
     return dp

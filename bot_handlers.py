@@ -31,10 +31,17 @@ logger = logging.getLogger(__name__)
 
 WELCOME = (
     "👋 <b>Syntora Space</b> — студия ИИ-менеджеров и AI-лендингов.\n\n"
-    "Это <b>демо</b> бота сбора заявок: вы заполняете короткую анкету — "
-    "заявка мгновенно приходит менеджеру в Telegram.\n\n"
-    "Так же работает форма на сайте Syntora Space.\n\n"
+    "Это <b>демо</b> бота сбора заявок. Реальную заявку удобнее оставить "
+    "на сайте: https://syntora.space/#contact\n\n"
     "Нажмите «📝 Оставить заявку»."
+)
+
+CONSENT_PROMPT = (
+    "Перед началом работы нужно ваше согласие на обработку персональных данных:\n"
+    "https://syntora.space/consent.html\n"
+    "Политика: https://syntora.space/privacy.html\n\n"
+    "Нажимая «Согласен», вы даёте его. Без согласия бот не примет заявку.\n"
+    "Реальные контакты лучше оставлять через форму на сайте."
 )
 
 ABOUT = (
@@ -81,9 +88,34 @@ def service_keyboard() -> InlineKeyboardMarkup:
 
 
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    """Show Syntora welcome and main menu."""
+    """Ask for PDN consent before any questionnaire."""
     await state.clear()
-    await message.answer(WELCOME, parse_mode="HTML", reply_markup=main_keyboard())
+    await message.answer(
+        CONSENT_PROMPT,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Согласен", callback_data="pdn:yes")],
+                [InlineKeyboardButton(text="Отказаться", callback_data="pdn:no")],
+            ]
+        ),
+        disable_web_page_preview=True,
+    )
+
+
+async def consent_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Store explicit consent (or refusal) before the demo form."""
+    await callback.answer()
+    if callback.data == "pdn:no":
+        await state.clear()
+        if callback.message:
+            await callback.message.answer(
+                "Без согласия бот не принимает заявку. Форма на сайте: https://syntora.space/#contact",
+                disable_web_page_preview=True,
+            )
+        return
+    await state.update_data(pdn_ok=True)
+    if callback.message:
+        await callback.message.answer(WELCOME, parse_mode="HTML", reply_markup=main_keyboard())
 
 
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
@@ -96,7 +128,11 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 async def start_lead(message: Message, state: FSMContext) -> None:
-    """Begin the lead questionnaire."""
+    """Begin the lead questionnaire after PDN consent."""
+    data = await state.get_data()
+    if not data.get("pdn_ok"):
+        await cmd_start(message, state)
+        return
     await state.set_state(LeadForm.name)
     await message.answer(
         "📝 <b>Заявка в Syntora Space</b>\n\nШаг 1 из 4: как вас зовут?",
@@ -114,7 +150,7 @@ async def show_site(message: Message) -> None:
     """Link to the main website."""
     await message.answer(
         "🌐 Сайт: https://syntora.space\n\n"
-        "Форма на сайте работает так же — заявка сразу в Telegram менеджеру.",
+        "Форма на сайте работает так же — заявка сохраняется в РФ и сразу в CRM.",
         disable_web_page_preview=True,
     )
 
@@ -260,6 +296,7 @@ def build_dispatcher(storage: BaseStorage | None = None) -> Dispatcher:
     dp.message.register(form_name, StateFilter(LeadForm.name), F.text)
     dp.message.register(form_phone, StateFilter(LeadForm.phone), F.text)
     dp.message.register(form_message, StateFilter(LeadForm.message), F.text)
+    dp.callback_query.register(consent_callback, F.data.in_({"pdn:yes", "pdn:no"}))
     dp.callback_query.register(form_service_callback, StateFilter(LeadForm.service))
     dp.callback_query.register(stale_callback)
     dp.message.register(fallback_text, F.text)
